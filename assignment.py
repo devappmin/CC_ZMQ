@@ -1,78 +1,70 @@
-import random, threading, time, zmq, socket, argparse, json
-#import matplotlib.pyplot as plt
+import random, time, zmq, argparse
+import matplotlib.pyplot as plt
 
 B = 32
 
 """ Client function """
-def client(host):
-    # IPv4 TCP socket that connected to bitsource
-    bsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    bsock.connect((host, 6750))
+def client(zcontext, in_url, out_url):
+    # Create the socket that is PUSH
+    # and it will be connected into bitsource
+    bsock = zcontext.socket(zmq.PUSH)
+    bsock.connect(out_url)
 
-    # IPv4 TCP socket that connected to tally
-    tsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    tsock.connect((host, 6704))
+    # Create the socket that is PULL
+    # and it will be connected into tally
+    tsock = zcontext.socket(zmq.PULL)
+    tsock.connect(in_url)
     
     # Input number 
     N = input("Input the number of count : ")
-    tsock.sendall(str(N).encode())
-    bsock.sendall(str(N).encode())
+    
+    # Send string 'N' to bitsource socket
+    bsock.send_string(str(N))
 
-
-    # Get value from tally and print it
+    # Loop from 0 to N - 1
     for i in range(int(N)):
-        #li = json.loads(tsock.recv(1024).decode('ascii'))
+
+        # Receive json from tally and print it
         li = tsock.recv_json()
+        print(li)
 
-        print('{} : {}'.format(li[0], li[1]))
-        #plt.plot(li[0], li[1], 'r,')
+        plt.plot(li[0], li[1], 'r,')
         
-
-    #plt.show()
+    plt.show()
     
-    # Close the socket
-    bsock.close()
-    tsock.close()
-    
-""" Bitsource Function 
-
-Also added client IP address as parameter
-"""
+""" Bitsource Function """
 def bitsource(zcontext, url, client):
 
     # Create the socket that is publisher
-    # It will connected to always_yes and judge functions
+    # It will be connected into always_yes and judge functions
     zsock = zcontext.socket(zmq.PUB)
     zsock.bind(url)
-    print('zsock bind completed')
+    print('Bind into {}'.format(url))
     
-    # IPv4 TCP Server socket that is connected to client
-    csock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    csock.bind((client, 6750))
-    csock.listen(1)
+    # Create the socket that is PULL
+    # It will be connected into client
+    csock = zcontext.socket(zmq.PULL)
+    csock.bind(client)
 
-    # Accept client and get value 'cnt' from client
+    # receive value 'cnt' from client
     # 'cnt' is the value 'N' in client
-    sc, sockname = csock.accept()
-    cnt = int(sc.recv(1024).decode("ascii"))
+    cnt = int(csock.recv_string())
+    print('get value: {}'.format(cnt))
 
     # Start loop from 0 to cnt - 1
     for i in range(cnt):
         # Put 0/1 strings using ones_and_zeros function into oaz
         oaz = ones_and_zeros(B * 2)
-        print('Sent {} : {}'.format(i, oaz))
+        print('Send {} : {}'.format(i, oaz))
 
         # Send oaz value to subscribers
         zsock.send_string(oaz)
 
         time.sleep(0.01)
     
-    # Send b'DONE' to subscribers
+    # Send 'DONE' to subscribers
     # It means bitsource completely sent all oaz values
-    zsock.send_string(b'DONE')
-
-    # Close TCP socket
-    sc.close()
+    zsock.send_string('DONE')
 
 """ Ones_and_zeros function """
 def ones_and_zeros(digits):
@@ -82,7 +74,7 @@ def ones_and_zeros(digits):
 def always_yes(zcontext, in_url, out_url):
 
     # Create the socket that is subscriber
-    # It will connected to bitsource
+    # It will be connected into bitsource
     isock = zcontext.socket(zmq.SUB)
     isock.connect(in_url)
     
@@ -91,7 +83,7 @@ def always_yes(zcontext, in_url, out_url):
     isock.setsockopt(zmq.SUBSCRIBE, b'00')
 
     # Create the socket that is PUSH
-    # It will connected to tally
+    # It will be connected into tally
     osock = zcontext.socket(zmq.PUSH)
     osock.connect(out_url)
 
@@ -99,11 +91,12 @@ def always_yes(zcontext, in_url, out_url):
     while True:
         # Receive string from isock(bitsource)
         recv = isock.recv_string()
-        print('receive {} : {}'.format(i, recv))
+        print('Receive {} : {}'.format(i, recv))
 
-        # If recv is b'DONE' not 0/1 combined string, break the loop
-        if recv == b'DONE':
-            print('Send done')
+        # If recv is 'DONE' not 0/1 combined string, break the loop
+        if recv == 'DONE':
+            osock.send_string('DONE')
+            print('Close the function')
             break
 
         # Send 'Y' to PULL
@@ -117,7 +110,7 @@ def always_yes(zcontext, in_url, out_url):
 def judge(zcontext, in_url, pythagoras_url, out_url):
 
     # Create the socket that is subscriber
-    # It will connected to bitsource
+    # It will be connected into bitsource
     isock = zcontext.socket(zmq.SUB)
     isock.connect(in_url)
 
@@ -126,12 +119,12 @@ def judge(zcontext, in_url, pythagoras_url, out_url):
         isock.setsockopt(zmq.SUBSCRIBE, prefix)
 
     # Create the socket that is request
-    # It will connected to pythagoras
+    # It will be connected into pythagoras
     psock = zcontext.socket(zmq.REQ)
     psock.connect(pythagoras_url)
 
     # Create the socket that is PUSH
-    # It will connected to tally
+    # It will be connected into tally
     osock = zcontext.socket(zmq.PUSH)
     osock.connect(out_url)
 
@@ -143,13 +136,14 @@ def judge(zcontext, in_url, pythagoras_url, out_url):
     while True:
         # Receive string from isock(bitsource)
         bits = isock.recv_string()
-        print('receive {} : {}'.format(i, bits))
+        print('Receive {} : {}'.format(i, bits))
 
-        # If recv is b'DONE' not 0/1 combined string,
-        # send b'DONE' to REP(pythagoras) and break the loop
-        if bits == b'DONE':
-            print('Send done')
-            psock.send_json(b'DONE')
+        # If recv is 'DONE' not 0/1 combined string,
+        # send 'DONE' to REP(pythagoras) and break the loop
+        if bits == 'DONE':
+            print('Close the function')
+            psock.send_json('DONE')
+            osock.send_string('DONE')
             break
 
 
@@ -178,41 +172,43 @@ def pythagoras(zcontext, url):
     while True:
         # Receive json from zsock(judge)
         numbers = zsock.recv_json()
-        print('Received {}'.format(numbers))
+        print('Receive {}'.format(numbers))
 
-        # If numbers is b'DONE', break the loop
-        if numbers == b'DONE':
+        # If numbers is 'DONE', break the loop
+        if numbers == 'DONE':
             break
 
-        # Send json that contains [                           ] to zsock(judge)
-        zsock.send_json(sum(n * n for n in numbers))
-        print('Send {}'.format(sum(n * n for n in numbers)))
+        # Send json that contains sumsquares to zsock(judge)
+        ans = sum(n * n for n in numbers)
+        zsock.send_json(ans)
+        print('Send {}'.format(ans))
 
 
 """ Tally function """
 def tally(zcontext, url, client):
-    # Create socket that is PULL
-    # It will connected always_yes and judge
+    # Create the socket that is PULL
+    # It will be connected into always_yes and judge
     zsock = zcontext.socket(zmq.PULL)
     zsock.bind(url)
 
-    # IPv4 TCP Server socket that is connected to client
-    csock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    csock.bind((client, 6704))
-    csock.listen(1)
+    # Create the socket that is PUSH
+    # It will be connected into client
+    csock = zcontext.socket(zmq.PUSH)
+    csock.bind(client)
 
-    # Accept client and get value 'cnt' from client
-    # 'cnt' is the value 'N' in client
-    sc, sockname = csock.accept()
-    cnt = int(sc.recv(1024).decode("ascii"))
+    # set p = 0, q = 0, done_count = 0
+    p = q = done_count = 0
 
-    # set p = 0, q = 0
-    p = q = 0
-
-    # Start loop from 0 to cnt - 1
-    for i in range(cnt):
+    # Start loop until done_count became 2
+    while done_count != 2:
         # Receive strings from zsock(always_yes, judge)
         decision = zsock.recv_string()
+
+        # If we received 'DONE' bytes, add 1 to done_count
+        # and continue the loop
+        if decision == 'DONE':
+            done_count += 1
+            continue
 
         # Add 1 to q
         q += 1
@@ -226,39 +222,14 @@ def tally(zcontext, url, client):
         print(decision, p, q, dvd)
 
         # Send json (q, dvd) into client
-        #sc.sendall('[{}, {}]'.format(q, dvd).encode())
-        sc.send_json((q, dvd))
+        csock.send_json((q, dvd))
 
-    # Close TCP socket
-    sc.close()
-
+""" main function """
 def main(zcontext, args):
-    pubsub = 'tcp://127.0.0.1:6700'
-    reqrep = 'tcp://127.0.0.1:6701'
-    pushpull = 'tcp://127.0.0.1:6702'
-    #start_thread(bitsource, zcontext, pubsub)
-    #start_thread(always_yes, zcontext, pubsub, pushpull)
-    #start_thread(judge, zcontext, pubsub, reqrep, pushpull)
-    #start_thread(pythagoras, zcontext, reqrep)
-    #start_thread(tally, zcontext, pushpull)
-    """
+    # Start function depending on the arguments
+
     if args.b:
-        start_thread(bitsource, zcontext, pubsub)
-    elif args.a:
-        start_thread(always_yes, zcontext, pubsub, pushpull)
-    elif args.j:
-        start_thread(judge, zcontext, pubsub, reqrep, pushpull)
-    elif args.p:
-        start_thread(pythagoras, zcontext, reqrep)
-    elif args.t:
-        start_thread(tally, zcontext, pushpull)
-    elif args.c:
-        client()
-    """
-    
-    """
-    if args.b:
-        bitsource(zcontext, args.b[0], args.b[1])
+        bitsource(zcontext, args.b[0], args.b[1]) 
     elif args.a:
         always_yes(zcontext, args.a[0], args.a[1])
     elif args.j:
@@ -268,29 +239,12 @@ def main(zcontext, args):
     elif args.t:
         tally(zcontext, args.t[0], args.t[1])
     elif args.c:
-        client(args.c)
-    """
-
-    if args.b:
-        bitsource(zcontext, pubsub, '127.0.0.1')
-    elif args.a:
-        always_yes(zcontext, pubsub, pushpull)
-    elif args.j:
-        judge(zcontext, pubsub, reqrep, pushpull)
-    elif args.p:
-        pythagoras(zcontext, reqrep)
-    elif args.t:
-        tally(zcontext, pushpull, '127.0.0.1')
-    elif args.c:
-        client('127.0.0.1')
-
-
-    #time.sleep(30)
+        client(zcontext, args.c[0], args.c[1])
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Assignment 1 Program')
-    parser.add_argument('-c', metavar='client', default=None, help='run as client')
+    parser.add_argument('-c', metavar='client', nargs='+', default=None, help='run as client')
     parser.add_argument('-b', metavar='bitsource', nargs='+', default=None, help='run as server: bitsource')
     parser.add_argument('-a', metavar='always_yes', nargs='+', default=None, help='run as server: always_yes')
     parser.add_argument('-j', metavar='judge', nargs='+', default=None, help='run as server: judge')
